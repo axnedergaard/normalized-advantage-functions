@@ -144,12 +144,11 @@ class Agent:
     self.M = Layer(self.H.h, M_n, batch_normalize=batch_normalize)
     self.N = fill_lower_triangular(self.M.h)
     self.L = tf.matrix_set_diag(self.N, tf.exp(tf.matrix_diag_part(self.N)))
-    #self.P = tf.eye(self.action_n,batch_shape=[tf.shape(self.u)[0]]) 
-    self.P = tf.matmul(self.L, tf.matrix_transpose(self.L)) #covariance matrix
+    self.P = tf.eye(self.action_n,batch_shape=[tf.shape(self.u)[0]]) 
+    #self.P = tf.matmul(self.L, tf.matrix_transpose(self.L)) #covariance matrix
     self.D = tf.reshape(self.u - self.mu.h, [-1,1,action_n])
-    self.A = (-1.0/2.0)*tf.reshape(tf.matmul(tf.matmul(self.D, self.P), tf.transpose(self.D, perm=[0,2,1])), [-1,action_n]) #advantage function
-    #self.A = -tf.reshape(tf.matmul(self.D, tf.transpose(self.D, perm=[0,2,1])), [-1,action_n])
-    #self.A = -tf.square(self.u - self.mu.h)
+    self.A = (-1.0/2.0)*tf.reshape(tf.matmul(tf.matmul(self.D, self.P), tf.transpose(self.D, perm=[0,2,1])), [-1,1]) #advantage function
+    #self.A = -tf.reshape(tf.matmul(self.D, tf.transpose(self.D, perm=[0,2,1])), [-1,1])
     self.Q = self.A + self.V.h
     self.loss = tf.reduce_sum(tf.square(self.target - self.Q))
     self.optimiser = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss) 
