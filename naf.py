@@ -4,53 +4,11 @@
 #additional observation/action space support (continuous)
 #experiment with different covariance matrices for advantage function
 #more clever exploration policy
-#refactor for hyperparameter experiments
 
-import gym
 import tensorflow as tf
 import numpy as np
 import random
 from tensorflow.python.ops.distributions.util import fill_lower_triangular
-import matplotlib.pyplot as plt
-import argparse
-
-#silence TF compilation warnings
-import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
-
-#parser
-parser = argparse.ArgumentParser()
-parser.add_argument('--environment',dest='environment',type=str, default='InvertedPendulum-v1')
-parser.add_argument('--batch_normalize',dest='batch_normalize',type=bool,default=True)
-parser.add_argument('--learning_rate',dest='learning_rate', type=float, default=0.0001)
-parser.add_argument('--batch_size',dest='batch_size',type=int, default=64)
-parser.add_argument('--capacity',dest='capacity',type=int, default=10000)
-parser.add_argument('--tau',dest='tau',type=float, default=0.99)
-parser.add_argument('--gamma',dest='gamma',type=float, default=0.99)
-parser.add_argument('--epsilon',dest='epsilon',type=float, default=1)
-parser.add_argument('--hidden_size',dest='hidden_size',type=int, default=200)
-parser.add_argument('--hidden_n',dest='hidden_n',type=int, default=2)
-parser.add_argument('--graph',action='store_true')
-parser.add_argument('--render',action='store_true')
-parser.add_argument('--verbose',action='store_true')
-parser.add_argument('--hidden_activation',dest='hidden_activation',default=tf.nn.relu)
-parser.add_argument('--post_run',action='store_true')
-parser.add_argument('--run_steps',dest='run_steps',type=int,default=1000)
-parser.add_argument('--train_steps',dest='train_steps',type=int,default=5)
-parser.add_argument('--print_args',action='store_true')
-parser.add_argument('--save',dest='save',type=str,default=None)
-parser.add_argument('--load',dest='load',type=str,default=None)
-args = parser.parse_args()
-
-def random_process(mean,cov):
-  return np.random.multivariate_normal(mean,cov)
-
-def scale_action(actions, low, high): #assume domain [-1,1]
-  actions = np.clip(actions, -1, 1)
-  scaled_actions = []
-  for a in actions:
-    scaled_actions += [(a+1)*(high-low)/2+low]
-  return scaled_actions #range [low,high]
 
 class Memory:
   def __init__(self, capacity, batch_size):
@@ -78,7 +36,7 @@ class Layer:
     batch_size, in_n = np.shape(x)
     in_n = int(in_n)
     if batch_normalize:
-      variance_epsilon = 0.00000001
+      variance_epsilon = 0.000001
       decay = 0.999
       self.gamma = tf.Variable(tf.constant(1,shape=[in_n],dtype=tf.float32), trainable=True)
       self.beta = tf.Variable(tf.constant(0,shape=[in_n],dtype=tf.float32), trainable=True)
@@ -110,19 +68,22 @@ class Layer:
     return update
 
 class Agent:
-  def __init__(self, state_n, action_n):
-    self.state_n = state_n
-    self.action_n = action_n
-    
-    self.learning_rate = args.learning_rate
-    self.gamma = args.gamma
-    self.tau = args.tau
-    self.epsilon = args.epsilon
-    batch_normalize = args.batch_normalize
+  def __init__(self, observation_space, action_space, learning_rate, batch_normalize, gamma, tau, epsilon, hidden_size, hidden_n, hidden_activation, batch_size, memory_capacity):
+    self.memory = Memory(memory_capacity,batch_size)
 
-    hidden_activation = args.hidden_activation
-    H_layer_n = args.hidden_n
-    H_n = args.hidden_size 
+    self.observation_space = observation_space
+    self.action_space = action_space
+
+    self.state_n = observation_space.shape[0]
+    self.action_n = action_space.shape[0]
+    
+    self.learning_rate = learning_rate
+    self.gamma = gamma
+    self.tau = tau
+    self.epsilon = epsilon
+
+    H_layer_n = hidden_n
+    H_n = hidden_size 
     M_n = int((self.action_n)*(self.action_n+1)/2)
     V_n = 1
     mu_n = self.action_n
@@ -130,9 +91,9 @@ class Agent:
     tf.reset_default_graph()
 
     #neural network architecture
-    self.x = tf.placeholder(shape=[None,state_n],dtype=tf.float32,name="state")
-    self.u = tf.placeholder(shape=[None,action_n],dtype=tf.float32,name="action")
-    self.target = tf.placeholder(shape=[None,1],dtype=tf.float32,name="target")
+    self.x = tf.placeholder(shape=[None,self.state_n], dtype=tf.float32, name="state")
+    self.u = tf.placeholder(shape=[None,self.action_n], dtype=tf.float32, name="action")
+    self.target = tf.placeholder(shape=[None,1], dtype=tf.float32, name="target")
 
     self.H = Layer(self.x, H_n, activation=hidden_activation, batch_normalize=batch_normalize) 
     self.t_H = Layer(self.x, H_n, activation=hidden_activation, batch_normalize=batch_normalize) #target
@@ -147,36 +108,66 @@ class Agent:
     self.t_V = Layer(self.t_H.h, V_n, batch_normalize=batch_normalize) #target
     self.updates += self.t_V.construct_update(self.V, self.tau)
     self.mu = Layer(self.H.h, mu_n, activation=tf.nn.tanh, batch_normalize=batch_normalize)
-    #self.M = Layer(self.H.h, M_n, batch_normalize=batch_normalize)
-    #self.N = fill_lower_triangular(self.M.h)
-    #self.L = tf.matrix_set_diag(self.N, tf.exp(tf.matrix_diag_part(self.N)))
+    self.M = Layer(self.H.h, M_n, batch_normalize=batch_normalize)
+    self.N = fill_lower_triangular(self.M.h)
+    self.L = tf.matrix_set_diag(self.N, tf.exp(tf.matrix_diag_part(self.N)))
     #self.O = Layer(self.H.h, mu_n, batch_normalize=batch_normalize) #nn input to diagonal covariance
     #self.P = tf.matrix_set_diag(tf.eye(self.action_n,batch_shape=[tf.shape(self.x)[0]]), self.O.h) #diagonal covariance
     self.P = tf.eye(self.action_n,batch_shape=[tf.shape(self.x)[0]]) #identity covariance
     #self.P = tf.matmul(self.L, tf.matrix_transpose(self.L)) #original NAF covariance
     #self.P_inverse = tf.matrix_inverse(self.P) #for exploration policy
-    self.P_inverse = tf.matrix_inverse(self.P)
-    self.D = tf.reshape(self.u - self.mu.h, [-1,1,action_n])
-    self.A = (-1.0/2.0)*tf.reshape(tf.matmul(tf.matmul(self.D, self.P), tf.transpose(self.D, perm=[0,2,1])), [-1,1]) #advantage function
+    self.D = tf.reshape(self.u - self.mu.h, [-1,1,self.action_n])
+    #self.A = (-1.0/2.0)*tf.reshape(tf.matmul(tf.matmul(self.D, self.P), tf.transpose(self.D, perm=[0,2,1])), [-1,1]) #advantage function
+    self.A = -tf.reshape(tf.matmul(tf.matmul(self.D, self.P), tf.transpose(self.D, perm=[0,2,1])), [-1,1]) #advantage function
     #self.A = -tf.reshape(tf.matmul(self.D, tf.transpose(self.D, perm=[0,2,1])), [-1,1])
     self.Q = self.A + self.V.h
     self.loss = tf.reduce_sum(tf.square(self.target - self.Q))
     self.optimiser = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss) 
 
-    self.saver = tf.train.Saver()
-
     self.sess = tf.Session()
 
-    if args.load is not None and os.path.isfile(args.load + ".index"):
-      self.saver.restore(self.sess, args.load)
-    else:
-      init = tf.global_variables_initializer()
-      self.sess.run(init)
-
+    init = tf.global_variables_initializer()
+    self.sess.run(init)
+  
   def get_action(self,s):
-    a,p = self.sess.run([self.mu.h,self.P_inverse],feed_dict={self.x:np.reshape(s,[1,-1])})
-    return a[0],p[0]
- 
+    return self.scale(self.noise(self.get_mu(s)), self.action_space.low, self.action_space.high)
+  
+  def observe(self,state,action,reward,state_next,terminal):
+    self.memory.store((state,action,reward,state_next,terminal))
+
+  def learn(self):
+    if self.memory.ready: 
+      batch_target = []
+      batch_state = []
+      batch_action = []
+      batch_reward = []
+      batch_state_next = []
+      batch_terminal = []
+      for [t_s,t_a,t_r,t_s_next,t_terminal] in self.memory.sample():
+        batch_state_next += [t_s_next]
+        batch_state += [t_s]
+        batch_action += [t_a]
+        batch_reward += [t_r]
+        batch_terminal += [t_terminal]
+      batch_target = self.get_target(batch_action, batch_reward, batch_state_next, batch_terminal)
+      l = self.backprop(batch_state, batch_action, batch_target)
+      self.update_target()
+
+  def get_mu(self,s):
+    #a,p = self.sess.run([self.mu.h,self.P_inverse],feed_dict={self.x:np.reshape(s,[1,-1])})
+    #return a[0],p[0]
+    return self.sess.run(self.mu.h,feed_dict={self.x:np.reshape(s,[1,-1])})[0]
+
+  def noise(self,a):
+    return np.random.multivariate_normal(a,self.epsilon*np.eye(len(a)))
+
+  def scale(self,actions, low, high): #assume domain [-1,1]
+    actions = np.clip(actions, -1, 1)
+    scaled_actions = []
+    for a in actions:
+      scaled_actions += [(a+1)*(high-low)/2+low]
+    return np.reshape(scaled_actions,[-1]) #range [low,high]  
+  
   def get_target(self,a,r,s_next,terminal): 
     targets = np.reshape(r,[-1,1]) + np.reshape(self.gamma*self.sess.run(self.t_V.h,feed_dict={self.x:s_next,self.u:a}),[-1,1])
     for i in range(len(terminal)):
@@ -184,100 +175,11 @@ class Agent:
        targets[i] = r[i]
     return targets
 
-  def learn(self,batch_state,batch_action,batch_target):
-    a,l,_ = self.sess.run([self.A, self.loss,self.optimiser],feed_dict={self.x:batch_state, self.target:batch_target, self.u:batch_action})
-    return a,l
+  def backprop(self,batch_state,batch_action,batch_target):
+    l,_ = self.sess.run([self.loss,self.optimiser],feed_dict={self.x:batch_state, self.target:batch_target, self.u:batch_action})
+    return l
 
   def update_target(self):
     for update in self.updates:
       self.sess.run(update)
 
-if args.print_args:
-  print(args)
-
-run_steps = args.run_steps
-train_steps = args.train_steps
-
-capacity = args.capacity
-batch_size = args.batch_size
-
-env = gym.make(args.environment)
-
-agent = Agent(env.observation_space.shape[0], env.action_space.shape[0])
-memory = Memory(capacity, batch_size)
-
-agent.update_target()
-runs = 0
-rewards = []
-while True:
-  try:
-    reward = 0
-    s = env.reset()
-    for i in range(run_steps):
-      if args.render:
-        env.render()
-      a,p = agent.get_action(s)
-      #a_noised = random_process(a,agent.epsilon*p)
-      a_noised = agent.epsilon*random_process(a,np.eye(len(a)))
-      a_scaled = scale_action(a_noised, env.action_space.low, env.action_space.high)
-      s_next,r,terminal,_ = env.step(a_scaled)
-      if args.verbose:
-        print("Action:" + str(a) + "->" + str(a_noised) + "->" + str(a_scaled))
-      if i >= run_steps-1:
-        terminal = True
-      memory.store([s,a,r,s_next,terminal])
-      reward += r
-      s = s_next
-      for j in range(train_steps):
-        if memory.ready: 
-          batch_target = []
-          batch_state = []
-          batch_action = []
-          batch_reward = []
-          batch_state_next = []
-          batch_terminal = []
-          for [t_s,t_a,t_r,t_s_next,t_terminal] in memory.sample():
-            batch_state_next += [t_s_next]
-            batch_state += [t_s]
-            batch_action += [t_a] 
-            batch_reward += [t_r]
-            batch_terminal += [t_terminal]
-          batch_target = agent.get_target(batch_action, batch_reward, batch_state_next, batch_terminal)
-          advantage,l = agent.learn(batch_state, batch_action, batch_target)
-          agent.update_target()
-          if args.verbose:
-            print("Loss: " + str(l))
-            print("Advantage: " + str(np.min(advantage)) + '\n')
-      if terminal:
-      #  agent.epsilon = 1.0 / (1 + runs*0.01)
-        break
-    print("r(" + str(runs) + ")=" + str(reward))
-    rewards += [reward]
-    runs += 1
-  except KeyboardInterrupt:
-    break
-
-if args.post_run:
-  while True:
-    try:
-      reward = 0
-      s = env.reset()
-      for i in range(run_steps):
-        env.render()
-        a,_ = agent.get_action(s)
-        a = scale_action(a, env.action_space.low, env.action_space.high)
-        s_next,r,terminal,_ = env.step(a)
-        reward += r
-        s = s_next
-        if terminal:
-          break
-      print("pr(" + str(i) + ")=" + str(reward))
-    except KeyboardInterrupt:
-      break
-
-if args.save is not None:
-  agent.saver.save(agent.sess, args.save)
-
-if args.graph:
-  plt.plot(rewards)
-  plt.show()
