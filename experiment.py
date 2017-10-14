@@ -15,20 +15,20 @@ parser.add_argument('--graph', action='store_true')
 parser.add_argument('--render', action='store_true')
 parser.add_argument('--environment', dest='environment', type=str, default='InvertedPendulum-v1')
 parser.add_argument('--repeats', dest='repeats', type=int, default=1)
-parser.add_argument('--episodes', dest='episodes', type=int, default=100)
+parser.add_argument('--episodes', dest='episodes', type=int, default=1000)
 parser.add_argument('--episode_steps', dest='episode_steps', type=int, default=1000)
 parser.add_argument('--train_steps', dest='train_steps', type=int, default=5)
 parser.add_argument('--learning_rate', dest='learning_rate', type=float, nargs='+', default=0.01)
 parser.add_argument('--batch_normalize', dest='batch_normalize', type=bool, default=True)
 parser.add_argument('--gamma', dest='gamma', type=float,nargs='+', default=0.99)
 parser.add_argument('--tau', dest='tau', type=float,nargs='+', default=0.99)
-parser.add_argument('--epsilon', dest='epsilon', type=float, nargs='+', default=0.3)
-parser.add_argument('--hidden_size', dest='hidden_size', type=int, nargs='+', default=16)
+parser.add_argument('--epsilon', dest='epsilon', type=float, nargs='+', default=0.1)
+parser.add_argument('--hidden_size', dest='hidden_size', type=int, nargs='+', default=32)
 parser.add_argument('--hidden_n', dest='hidden_n', type=int,nargs='+', default=2)
 parser.add_argument('--hidden_activation', dest='hidden_activation', nargs='+', default=tf.nn.relu)
-parser.add_argument('--batch_size', dest='batch_size', type=int,nargs='+', default=1024)
+parser.add_argument('--batch_size', dest='batch_size', type=int,nargs='+', default=128)
 parser.add_argument('--memory_capacity', dest='memory_capacity', type=int, nargs='+', default=10000)
-parser.add_argument('--verbose', action='store_true') 
+parser.add_argument('-v', action='count', default=0) 
 args = parser.parse_args()
 
 #get legends for plot
@@ -58,14 +58,14 @@ def recursive_experiment(keys, remaining_vals, vals):
     return rewards
 
 def experiment(args):
-  if args['verbose']:
+  if args['v'] > 0:
     print("Experiment " + str(args)) 
 
   env = gym.make(args['environment'])
- 
+  
   experiments_rewards = []
   for i in range(args['repeats']):
-    agent = naf.Agent(env.observation_space, env.action_space, args['learning_rate'], args['batch_normalize'], args['gamma'], args['tau'], args['epsilon'], args['hidden_size'], args['hidden_n'], args['hidden_activation'], args['batch_size'], args['memory_capacity'])
+    agent = naf.Agent(args['v'], env.observation_space, env.action_space, args['learning_rate'], args['batch_normalize'], args['gamma'], args['tau'], args['epsilon'], args['hidden_size'], args['hidden_n'], args['hidden_activation'], args['batch_size'], args['memory_capacity'])
     experiment_rewards = []
   
     for j in range(args['episodes']):
@@ -77,7 +77,9 @@ def experiment(args):
           env.render()
         
         action = agent.get_action(state)
-        state_next,reward,terminal,_ = env.step(action)
+        state_next,reward,terminal,_ = env.step(agent.scale(action, env.action_space.low, env.action_space.high))
+     
+        #state_next,reward,terminal,_ = env.step(action)
         
         if k-1 >= args['episode_steps']:
           terminal = True
@@ -89,17 +91,24 @@ def experiment(args):
         state = state_next
         rewards += reward
         if terminal:
+#          agent.epsilon = 1.0/(1.0+0.1*j+(1.0/(j+1))*np.log(j)) #drived through black magic for inverted double pendulum
+          #agent.epsilon = 1.0/(np.log(j+1)/np.log(3) + 0.001) #drived through black magic for inverted double pendulum 2
+          #print("[Update epsilon: " + str(agent.epsilon) + "]") 
           break
       experiment_rewards += [rewards]
+      if args['v'] > 0:
+        print("Reward(" + str(i) + "," + str(j) + "," + str(k) + ")=" + str(rewards))
+    if args['v'] > 1:
+      print(np.mean(experiment_rewards[-10:]))
     experiments_rewards += [experiment_rewards]
 
   return np.mean(experiments_rewards,axis=0)
 
 #main
-keys=['verbose', 'graph','render','environment','repeats','episodes','episode_steps','train_steps','batch_normalize', 'learning_rate','gamma','tau','epsilon','hidden_size','hidden_n','hidden_activation','batch_size', 'memory_capacity']
-vals=[args.verbose, args.graph, args.render, args.environment, args.repeats, args.episodes, args.episode_steps, args.train_steps, args.batch_normalize, args.learning_rate, args.gamma, args.tau, args.epsilon, args.hidden_size, args.hidden_n, args.hidden_activation, args.batch_size, args.memory_capacity]
+keys=['v', 'graph','render','environment','repeats','episodes','episode_steps','train_steps','batch_normalize', 'learning_rate','gamma','tau','epsilon','hidden_size','hidden_n','hidden_activation','batch_size', 'memory_capacity']
+vals=[args.v, args.graph, args.render, args.environment, args.repeats, args.episodes, args.episode_steps, args.train_steps, args.batch_normalize, args.learning_rate, args.gamma, args.tau, args.epsilon, args.hidden_size, args.hidden_n, args.hidden_activation, args.batch_size, args.memory_capacity]
 
-rewards=recursive_experiment(keys, vals,[])
+rewards=recursive_experiment(keys, vals, [])
 
 #plot
 if args.graph:
@@ -114,6 +123,6 @@ if args.graph:
   
   #plot rewards
   for r in rewards:
-    plt.plot(r)
+    plt.plot(r,'o')
   plt.legend(legends)
   plt.show()

@@ -68,7 +68,9 @@ class Layer:
     return update
 
 class Agent:
-  def __init__(self, observation_space, action_space, learning_rate, batch_normalize, gamma, tau, epsilon, hidden_size, hidden_n, hidden_activation, batch_size, memory_capacity):
+  def __init__(self, v, observation_space, action_space, learning_rate, batch_normalize, gamma, tau, epsilon, hidden_size, hidden_n, hidden_activation, batch_size, memory_capacity):
+    self.v = v
+
     self.memory = Memory(memory_capacity,batch_size)
 
     self.observation_space = observation_space
@@ -130,7 +132,11 @@ class Agent:
     self.sess.run(init)
   
   def get_action(self,s):
-    return self.scale(self.noise(self.get_mu(s)), self.action_space.low, self.action_space.high)
+    #mu,p_inv = self.sess.run([self.mu.h,self.P_inverse],feed_dict={self.x:np.reshape(s,[1,-1])})[0]
+    #return self.noise(mu, p_inv)
+    mu = self.sess.run(self.mu.h,feed_dict={self.x:np.reshape(s,[1,-1])})[0]
+    covariance = np.eye(self.action_n)
+    return self.noise(mu, covariance)
   
   def observe(self,state,action,reward,state_next,terminal):
     self.memory.store((state,action,reward,state_next,terminal))
@@ -150,17 +156,22 @@ class Agent:
         batch_reward += [t_r]
         batch_terminal += [t_terminal]
       batch_target = self.get_target(batch_action, batch_reward, batch_state_next, batch_terminal)
-      l = self.backprop(batch_state, batch_action, batch_target)
+      #l,a,self.p_inv = self.backprop(batch_state, batch_action, batch_target)
+      l,a = self.backprop(batch_state, batch_action, batch_target)
       self.update_target()
+      if (self.v > 1):
+        print(np.mean(a))
 
-  def get_mu(self,s):
+  #def get_mu(self,s):
     #a,p = self.sess.run([self.mu.h,self.P_inverse],feed_dict={self.x:np.reshape(s,[1,-1])})
     #return a[0],p[0]
-    return self.sess.run(self.mu.h,feed_dict={self.x:np.reshape(s,[1,-1])})[0]
 
-  def noise(self,a):
-    return np.random.multivariate_normal(a,self.epsilon*np.eye(len(a)))
+  def noise(self, mean, covariance):
+    return np.random.multivariate_normal(mean,self.epsilon*covariance)
 
+  #def noise(self, mean, precision_matrix):
+  #  return np.random.multivariate_normal(a,self.epsilon*precision_matrix)
+  
   def scale(self,actions, low, high): #assume domain [-1,1]
     actions = np.clip(actions, -1, 1)
     scaled_actions = []
@@ -176,8 +187,8 @@ class Agent:
     return targets
 
   def backprop(self,batch_state,batch_action,batch_target):
-    l,_ = self.sess.run([self.loss,self.optimiser],feed_dict={self.x:batch_state, self.target:batch_target, self.u:batch_action})
-    return l
+    l,a,_ = self.sess.run([self.loss,self.A,self.optimiser],feed_dict={self.x:batch_state, self.target:batch_target, self.u:batch_action})
+    return l,a
 
   def update_target(self):
     for update in self.updates:
