@@ -11,12 +11,13 @@ import random
 from tensorflow.python.ops.distributions.util import fill_lower_triangular
 
 class Memory:
-  def __init__(self, capacity, batch_size):
+  def __init__(self, capacity, batch_size, v):
     self.m = []
     self.ready = 0
     self.full = 0
     self.capacity = capacity
     self.batch_size = batch_size
+    self.v = v
  
   def store(self,d):    
     [s,a,r,s_next,terminal] = d
@@ -25,7 +26,8 @@ class Memory:
       self.m.pop(0)
     if not self.ready and len(self.m) >= self.batch_size:
       self.ready = 1
-      print("[Memory ready]")
+      if self.v > 0:
+        print("[Memory ready]")
 
   def sample(self):
     return random.sample(self.m, self.batch_size)
@@ -71,7 +73,7 @@ class Agent:
   def __init__(self, v, observation_space, action_space, learning_rate, batch_normalize, gamma, tau, epsilon, hidden_size, hidden_n, hidden_activation, batch_size, memory_capacity):
     self.v = v
 
-    self.memory = Memory(memory_capacity,batch_size)
+    self.memory = Memory(memory_capacity,batch_size,v)
 
     self.observation_space = observation_space
     self.action_space = action_space
@@ -110,18 +112,22 @@ class Agent:
     self.t_V = Layer(self.t_H.h, V_n, batch_normalize=batch_normalize) #target
     self.updates += self.t_V.construct_update(self.V, self.tau)
     self.mu = Layer(self.H.h, mu_n, activation=tf.nn.tanh, batch_normalize=batch_normalize)
+    
     self.M = Layer(self.H.h, M_n, batch_normalize=batch_normalize)
     self.N = fill_lower_triangular(self.M.h)
     self.L = tf.matrix_set_diag(self.N, tf.exp(tf.matrix_diag_part(self.N)))
     #self.O = Layer(self.H.h, mu_n, batch_normalize=batch_normalize) #nn input to diagonal covariance
+
     #self.P = tf.matrix_set_diag(tf.eye(self.action_n,batch_shape=[tf.shape(self.x)[0]]), self.O.h) #diagonal covariance
     self.P = tf.eye(self.action_n,batch_shape=[tf.shape(self.x)[0]]) #identity covariance
     #self.P = tf.matmul(self.L, tf.matrix_transpose(self.L)) #original NAF covariance
-    #self.P_inverse = tf.matrix_inverse(self.P) #for exploration policy
+    #self.P_inverse = tf.matrix_inverse(self.P) #precision matrix for exploration policy
+    
     self.D = tf.reshape(self.u - self.mu.h, [-1,1,self.action_n])
-    #self.A = (-1.0/2.0)*tf.reshape(tf.matmul(tf.matmul(self.D, self.P), tf.transpose(self.D, perm=[0,2,1])), [-1,1]) #advantage function
-    self.A = -tf.reshape(tf.matmul(tf.matmul(self.D, self.P), tf.transpose(self.D, perm=[0,2,1])), [-1,1]) #advantage function
+    
+    self.A =  (-1.0/2.0)*tf.reshape(tf.matmul(tf.matmul(self.D, self.P), tf.transpose(self.D, perm=[0,2,1])), [-1,1]) #advantage function
     #self.A = -tf.reshape(tf.matmul(self.D, tf.transpose(self.D, perm=[0,2,1])), [-1,1])
+    
     self.Q = self.A + self.V.h
     self.loss = tf.reduce_sum(tf.square(self.target - self.Q))
     self.optimiser = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss) 
@@ -162,16 +168,9 @@ class Agent:
       if (self.v > 1):
         print(np.mean(a))
 
-  #def get_mu(self,s):
-    #a,p = self.sess.run([self.mu.h,self.P_inverse],feed_dict={self.x:np.reshape(s,[1,-1])})
-    #return a[0],p[0]
-
   def noise(self, mean, covariance):
     return np.random.multivariate_normal(mean,self.epsilon*covariance)
 
-  #def noise(self, mean, precision_matrix):
-  #  return np.random.multivariate_normal(a,self.epsilon*precision_matrix)
-  
   def scale(self,actions, low, high): #assume domain [-1,1]
     actions = np.clip(actions, -1, 1)
     scaled_actions = []

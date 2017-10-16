@@ -16,7 +16,7 @@ parser.add_argument('--render', action='store_true')
 parser.add_argument('--environment', dest='environment', type=str, default='InvertedPendulum-v1')
 parser.add_argument('--repeats', dest='repeats', type=int, default=1)
 parser.add_argument('--episodes', dest='episodes', type=int, default=1000)
-parser.add_argument('--episode_steps', dest='episode_steps', type=int, default=1000)
+parser.add_argument('--max_episode_steps', dest='max_episode_steps', type=int, default=1000)
 parser.add_argument('--train_steps', dest='train_steps', type=int, default=5)
 parser.add_argument('--learning_rate', dest='learning_rate', type=float, nargs='+', default=0.01)
 parser.add_argument('--batch_normalize', dest='batch_normalize', type=bool, default=True)
@@ -45,6 +45,7 @@ def recursive_legend(keys, remaining_vals, vals):
       legend += recursive_legend(keys, remaining_vals[1:], vals + [l])
     return legend
 
+#run experiment for every combination of hyperparameters
 def recursive_experiment(keys, remaining_vals, vals):
   if remaining_vals == []:
     return [experiment(dict(zip(keys,vals)))]
@@ -61,7 +62,7 @@ def experiment(args):
   if args['v'] > 0:
     print("Experiment " + str(args)) 
 
-  env = gym.make(args['environment'])
+  env = gym.make(args['environment']) #TODO support multi-environment experiments
   
   experiments_rewards = []
   for i in range(args['repeats']):
@@ -72,7 +73,7 @@ def experiment(args):
       rewards = 0
       state = env.reset()
  
-      for k in range(args['episode_steps']):
+      for k in range(args['max_episode_steps']):
         if args['render']:
           env.render()
         
@@ -81,7 +82,7 @@ def experiment(args):
      
         #state_next,reward,terminal,_ = env.step(action)
         
-        if k-1 >= args['episode_steps']:
+        if k-1 >= args['max_episode_steps']:
           terminal = True
         agent.observe(state,action,reward,state_next,terminal)
 
@@ -91,8 +92,8 @@ def experiment(args):
         state = state_next
         rewards += reward
         if terminal:
-#          agent.epsilon = 1.0/(1.0+0.1*j+(1.0/(j+1))*np.log(j)) #drived through black magic for inverted double pendulum
-          #agent.epsilon = 1.0/(np.log(j+1)/np.log(3) + 0.001) #drived through black magic for inverted double pendulum 2
+#          agent.epsilon = 1.0/(1.0+0.1*j+(1.0/(j+1))*np.log(j)) #derived through black magic for inverted double pendulum TODO generalise and move implementation to agent class
+          #agent.epsilon = 1.0/(np.log(j+1)/np.log(3) + 0.001) #derived through black magic for inverted double pendulum 2
           #print("[Update epsilon: " + str(agent.epsilon) + "]") 
           break
       experiment_rewards += [rewards]
@@ -104,11 +105,15 @@ def experiment(args):
 
   return np.mean(experiments_rewards,axis=0)
 
-#main
-keys=['v', 'graph','render','environment','repeats','episodes','episode_steps','train_steps','batch_normalize', 'learning_rate','gamma','tau','epsilon','hidden_size','hidden_n','hidden_activation','batch_size', 'memory_capacity']
-vals=[args.v, args.graph, args.render, args.environment, args.repeats, args.episodes, args.episode_steps, args.train_steps, args.batch_normalize, args.learning_rate, args.gamma, args.tau, args.epsilon, args.hidden_size, args.hidden_n, args.hidden_activation, args.batch_size, args.memory_capacity]
 
-rewards=recursive_experiment(keys, vals, [])
+#main
+
+#construct experiment inputs
+keys=['v', 'graph','render','environment','repeats','episodes','max_episode_steps','train_steps','batch_normalize', 'learning_rate','gamma','tau','epsilon','hidden_size','hidden_n','hidden_activation','batch_size', 'memory_capacity']
+vals=[args.v, args.graph, args.render, args.environment, args.repeats, args.episodes, args.max_episode_steps, args.train_steps, args.batch_normalize, args.learning_rate, args.gamma, args.tau, args.epsilon, args.hidden_size, args.hidden_n, args.hidden_activation, args.batch_size, args.memory_capacity]
+
+#run experiments
+rewards = recursive_experiment(keys, vals, [])
 
 #plot
 if args.graph:
