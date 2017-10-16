@@ -107,7 +107,6 @@ class Agent:
       self.t_H = Layer(self.t_H.h, H_n, activation=hidden_activation, batch_normalize=batch_normalize) #target 
       self.updates += self.t_H.construct_update(self.H, self.tau)
 
-    self.M = Layer(self.H.h, M_n, batch_normalize=batch_normalize)
     self.V = Layer(self.H.h, V_n, batch_normalize=batch_normalize)
     self.t_V = Layer(self.t_H.h, V_n, batch_normalize=batch_normalize) #target
     self.updates += self.t_V.construct_update(self.V, self.tau)
