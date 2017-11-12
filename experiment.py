@@ -13,7 +13,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  #silence TF compilation warnings
 parser = argparse.ArgumentParser()
 parser.add_argument('--graph', action='store_true')
 parser.add_argument('--render', action='store_true')
-parser.add_argument('--environment', dest='environment', type=str, default='InvertedPendulum-v1')
+parser.add_argument('--environment', dest='environment', nargs='+', type=str, default='InvertedPendulum-v1')
 parser.add_argument('--repeats', dest='repeats', type=int, default=1)
 parser.add_argument('--episodes', dest='episodes', type=int, default=1000)
 parser.add_argument('--max_episode_steps', dest='max_episode_steps', type=int, default=1000)
@@ -26,9 +26,11 @@ parser.add_argument('--epsilon', dest='epsilon', type=float, nargs='+', default=
 parser.add_argument('--hidden_size', dest='hidden_size', type=int, nargs='+', default=32)
 parser.add_argument('--hidden_n', dest='hidden_n', type=int,nargs='+', default=2)
 parser.add_argument('--hidden_activation', dest='hidden_activation', nargs='+', default=tf.nn.relu)
-parser.add_argument('--batch_size', dest='batch_size', type=int,nargs='+', default=128)
+parser.add_argument('--batch_size', dest='batch_size', type=int, nargs='+', default=128)
 parser.add_argument('--memory_capacity', dest='memory_capacity', type=int, nargs='+', default=10000)
 parser.add_argument('-v', action='count', default=0) 
+parser.add_argument('--load', dest='load_path', type=str, default=None)
+parser.add_argument('--output', dest='output_path', type=str, default=None)
 args = parser.parse_args()
 
 #get legends for plot
@@ -62,11 +64,11 @@ def experiment(args):
   if args['v'] > 0:
     print("Experiment " + str(args)) 
 
-  env = gym.make(args['environment']) #TODO support multi-environment experiments
+  env = gym.make(args['environment'])
   
   experiments_rewards = []
   for i in range(args['repeats']):
-    agent = naf.Agent(args['v'], env.observation_space, env.action_space, args['learning_rate'], args['batch_normalize'], args['gamma'], args['tau'], args['epsilon'], args['hidden_size'], args['hidden_n'], args['hidden_activation'], args['batch_size'], args['memory_capacity'])
+    agent = naf.Agent(args['v'], env.observation_space, env.action_space, args['learning_rate'], args['batch_normalize'], args['gamma'], args['tau'], args['epsilon'], args['hidden_size'], args['hidden_n'], args['hidden_activation'], args['batch_size'], args['memory_capacity'], args['load_path'])
     experiment_rewards = []
   
     for j in range(args['episodes']):
@@ -79,11 +81,10 @@ def experiment(args):
         
         action = agent.get_action(state)
         state_next,reward,terminal,_ = env.step(agent.scale(action, env.action_space.low, env.action_space.high))
-     
-        #state_next,reward,terminal,_ = env.step(action)
         
         if k-1 >= args['max_episode_steps']:
           terminal = True
+          
         agent.observe(state,action,reward,state_next,terminal)
 
         for l in range(args['train_steps']):
@@ -92,9 +93,7 @@ def experiment(args):
         state = state_next
         rewards += reward
         if terminal:
-#          agent.epsilon = 1.0/(1.0+0.1*j+(1.0/(j+1))*np.log(j)) #derived through black magic for inverted double pendulum TODO generalise and move implementation to agent class
-          #agent.epsilon = 1.0/(np.log(j+1)/np.log(3) + 0.001) #derived through black magic for inverted double pendulum 2
-          #print("[Update epsilon: " + str(agent.epsilon) + "]") 
+          agent.reset()
           break
       experiment_rewards += [rewards]
       if args['v'] > 0:
@@ -103,31 +102,38 @@ def experiment(args):
       print(np.mean(experiment_rewards[-10:]))
     experiments_rewards += [experiment_rewards]
 
-  return np.mean(experiments_rewards,axis=0)
+  return experiments_rewards
 
 
 #main
 
 #construct experiment inputs
-keys=['v', 'graph','render','environment','repeats','episodes','max_episode_steps','train_steps','batch_normalize', 'learning_rate','gamma','tau','epsilon','hidden_size','hidden_n','hidden_activation','batch_size', 'memory_capacity']
-vals=[args.v, args.graph, args.render, args.environment, args.repeats, args.episodes, args.max_episode_steps, args.train_steps, args.batch_normalize, args.learning_rate, args.gamma, args.tau, args.epsilon, args.hidden_size, args.hidden_n, args.hidden_activation, args.batch_size, args.memory_capacity]
+keys=['v', 'graph','render','environment','repeats','episodes','max_episode_steps','train_steps','batch_normalize', 'learning_rate','gamma','tau','epsilon','hidden_size','hidden_n','hidden_activation','batch_size', 'memory_capacity', 'load_path']
+vals=[args.v, args.graph, args.render, args.environment, args.repeats, args.episodes, args.max_episode_steps, args.train_steps, args.batch_normalize, args.learning_rate, args.gamma, args.tau, args.epsilon, args.hidden_size, args.hidden_n, args.hidden_activation, args.batch_size, args.memory_capacity, args.load_path]
 
 #run experiments
 rewards = recursive_experiment(keys, vals, [])
+  
+#get legend
+l_keys = []
+l_vals = []
+for i,v in enumerate(vals):
+  if type(v) == list and len(v) > 1:
+    l_keys += [keys[i]]
+    l_vals += [v]
+legend = recursive_legend(l_keys, l_vals, []) 
+
+#save results
+if args.output_path is not None:
+  result_file = open(args.output_path, 'w')
+  result_file.write(str(args) + '\n')
+  result_file.write(str(legend) + '\n')
+  result_file.write(str(rewards))
+  result_file.close()
 
 #plot
 if args.graph:
-  #get legend
-  l_keys = []
-  l_vals = []
-  for i,v in enumerate(vals):
-    if type(v) == list and len(v) > 1:
-      l_keys += [keys[i]]
-      l_vals += [v]
-  legends = recursive_legend(l_keys, l_vals, []) 
-  
-  #plot rewards
-  for r in rewards:
+  for r in np.mean(rewards, -2): #mean of repeats
     plt.plot(r,'o')
-  plt.legend(legends)
+  plt.legend(legend)
   plt.show()

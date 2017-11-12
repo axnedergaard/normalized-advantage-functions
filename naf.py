@@ -1,9 +1,12 @@
 #Based on 'Continuous Deep Q-learning with Model Based Acceleration' by Gu et al, 2016. Available from: https://arxiv.org/pdf/1603.00748.pdf
 
 #TODO
+#confirm saver working
 #additional observation/action space support (continuous)
-#experiment with different covariance matrices for advantage function
+#experiment with different advantage functions/covariance matrices for advantage function
 #more clever exploration policy
+#adaptive batch size?
+#memories weighted by information/loss?
 
 import tensorflow as tf
 import numpy as np
@@ -70,7 +73,7 @@ class Layer:
     return update
 
 class Agent:
-  def __init__(self, v, observation_space, action_space, learning_rate, batch_normalize, gamma, tau, epsilon, hidden_size, hidden_n, hidden_activation, batch_size, memory_capacity):
+  def __init__(self, v, observation_space, action_space, learning_rate, batch_normalize, gamma, tau, epsilon, hidden_size, hidden_n, hidden_activation, batch_size, memory_capacity, load_path):
     self.v = v
 
     self.memory = Memory(memory_capacity,batch_size,v)
@@ -85,6 +88,7 @@ class Agent:
     self.gamma = gamma
     self.tau = tau
     self.epsilon = epsilon
+    self.resets = 0
 
     H_layer_n = hidden_n
     H_n = hidden_size 
@@ -112,9 +116,9 @@ class Agent:
     self.updates += self.t_V.construct_update(self.V, self.tau)
     self.mu = Layer(self.H.h, mu_n, activation=tf.nn.tanh, batch_normalize=batch_normalize)
     
-    self.M = Layer(self.H.h, M_n, batch_normalize=batch_normalize)
-    self.N = fill_lower_triangular(self.M.h)
-    self.L = tf.matrix_set_diag(self.N, tf.exp(tf.matrix_diag_part(self.N)))
+    #self.M = Layer(self.H.h, M_n, batch_normalize=batch_normalize)
+    #self.N = fill_lower_triangular(self.M.h)
+    #self.L = tf.matrix_set_diag(self.N, tf.exp(tf.matrix_diag_part(self.N)))
     #self.O = Layer(self.H.h, mu_n, batch_normalize=batch_normalize) #nn input to diagonal covariance
 
     #self.P = tf.matrix_set_diag(tf.eye(self.action_n,batch_shape=[tf.shape(self.x)[0]]), self.O.h) #diagonal covariance
@@ -135,13 +139,41 @@ class Agent:
 
     init = tf.global_variables_initializer()
     self.sess.run(init)
-  
+    
+    self.saver = tf.train.Saver()
+    if load_path is not None:
+      self.saver.restore(self.sess, load_path)
+
+ 
+  def reset(self):  #reset in between episodes (for example update epsilon), i is episode number 
+    if self.memory.ready:
+      self.resets = self.resets + 1
+      i = self.resets
+     # self.epsilon = 1.0/(1+i) 
+      self.epsilon = 1.0/(1.0+0.1*i+(1.0/(i+1))*np.log(i)) #derived through black magic for inverted double pendulum
+      if self.v > 1:
+        print("[Update epsilon: " + str(self.epsilon) + "]") 
+    #self.epsilon = 1.0/(np.log(i+1)/np.log(3) + 0.001) #derived through black magic for inverted double pendulum 2
+
+  def save(self, path):
+    self.saver.save(self.sess, path)
+
   def get_action(self,s):
+    mu = self.sess.run(self.mu.h,feed_dict={self.x:np.reshape(s,[1,-1])})[0]
+  
+    #random action with probability epsilon
+    if np.random.rand() < self.epsilon:
+      action = np.random.rand(self.action_n)*2-1 #random action
+    else:
+      action = mu
+
+    return action
+
+ #  covariance = np.eye(self.action_n)
+ #   return self.noise(mu, covariance)
+    
     #mu,p_inv = self.sess.run([self.mu.h,self.P_inverse],feed_dict={self.x:np.reshape(s,[1,-1])})[0]
     #return self.noise(mu, p_inv)
-    mu = self.sess.run(self.mu.h,feed_dict={self.x:np.reshape(s,[1,-1])})[0]
-    covariance = np.eye(self.action_n)
-    return self.noise(mu, covariance)
   
   def observe(self,state,action,reward,state_next,terminal):
     self.memory.store((state,action,reward,state_next,terminal))
@@ -164,7 +196,7 @@ class Agent:
       #l,a,self.p_inv = self.backprop(batch_state, batch_action, batch_target)
       l,a = self.backprop(batch_state, batch_action, batch_target)
       self.update_target()
-      if (self.v > 1):
+      if (self.v > 2):
         print(np.mean(a))
 
   def noise(self, mean, covariance):
