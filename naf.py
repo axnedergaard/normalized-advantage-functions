@@ -1,12 +1,14 @@
 #Based on 'Continuous Deep Q-learning with Model Based Acceleration' by Gu et al, 2016. Available from: https://arxiv.org/pdf/1603.00748.pdf
 
 #TODO
+#investigate and fix nan action bug
 #confirm saver working
 #additional observation/action space support (continuous)
 #experiment with different advantage functions/covariance matrices for advantage function
 #more clever exploration policy
 #adaptive batch size?
 #memories weighted by information/loss?
+#improved network initialisation?
 
 import tensorflow as tf
 import numpy as np
@@ -73,7 +75,7 @@ class Layer:
     return update
 
 class Agent:
-  def __init__(self, v, observation_space, action_space, learning_rate, batch_normalize, gamma, tau, epsilon, hidden_size, hidden_n, hidden_activation, batch_size, memory_capacity, load_path):
+  def __init__(self, v, observation_space, action_space, learning_rate, batch_normalize, gamma, tau, epsilon, hidden_size, hidden_n, hidden_activation, batch_size, memory_capacity, load_path, covariance):
     self.v = v
 
     self.memory = Memory(memory_capacity,batch_size,v)
@@ -115,21 +117,25 @@ class Agent:
     self.t_V = Layer(self.t_H.h, V_n, batch_normalize=batch_normalize) #target
     self.updates += self.t_V.construct_update(self.V, self.tau)
     self.mu = Layer(self.H.h, mu_n, activation=tf.nn.tanh, batch_normalize=batch_normalize)
-    
-    #self.M = Layer(self.H.h, M_n, batch_normalize=batch_normalize)
-    #self.N = fill_lower_triangular(self.M.h)
-    #self.L = tf.matrix_set_diag(self.N, tf.exp(tf.matrix_diag_part(self.N)))
-    #self.O = Layer(self.H.h, mu_n, batch_normalize=batch_normalize) #nn input to diagonal covariance
 
-    #self.P = tf.matrix_set_diag(tf.eye(self.action_n,batch_shape=[tf.shape(self.x)[0]]), self.O.h) #diagonal covariance
-    self.P = tf.eye(self.action_n,batch_shape=[tf.shape(self.x)[0]]) #identity covariance
-    #self.P = tf.matmul(self.L, tf.matrix_transpose(self.L)) #original NAF covariance
+    if covariance == "identity": #identity covariance
+      self.P = tf.eye(self.action_n,batch_shape=[tf.shape(self.x)[0]]) #identity covariance
+
+    elif covariance == "diagonal": #diagonal covariance with nn inputs
+      self.O = Layer(self.H.h, mu_n, batch_normalize=batch_normalize) #nn input to diagonal covariance
+      self.P = tf.matrix_set_diag(tf.eye(self.action_n,batch_shape=[tf.shape(self.x)[0]]), self.O.h) #diagonal covariance
+
+    else:  #original NAF covariance
+      self.M = Layer(self.H.h, M_n, activation=tf.nn.tanh, batch_normalize=batch_normalize)
+      self.N = fill_lower_triangular(self.M.h)
+      self.L = tf.matrix_set_diag(self.N, tf.exp(tf.matrix_diag_part(self.N)))
+      self.P = tf.matmul(self.L, tf.matrix_transpose(self.L)) #original NAF covariance
+
     #self.P_inverse = tf.matrix_inverse(self.P) #precision matrix for exploration policy
     
     self.D = tf.reshape(self.u - self.mu.h, [-1,1,self.action_n])
     
     self.A =  (-1.0/2.0)*tf.reshape(tf.matmul(tf.matmul(self.D, self.P), tf.transpose(self.D, perm=[0,2,1])), [-1,1]) #advantage function
-    #self.A = -tf.reshape(tf.matmul(self.D, tf.transpose(self.D, perm=[0,2,1])), [-1,1])
     
     self.Q = self.A + self.V.h
     self.loss = tf.reduce_sum(tf.square(self.target - self.Q))
@@ -159,8 +165,8 @@ class Agent:
     self.saver.save(self.sess, path)
 
   def get_action(self,s):
-    mu = self.sess.run(self.mu.h,feed_dict={self.x:np.reshape(s,[1,-1])})[0]
-  
+    mu = self.sess.run(self.mu.h, feed_dict={self.x:np.reshape(s,[1,-1])})[0]
+    
     #random action with probability epsilon
     if np.random.rand() < self.epsilon:
       action = np.random.rand(self.action_n)*2-1 #random action

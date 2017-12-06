@@ -1,3 +1,5 @@
+#TODO improved logging, include if env solved
+
 import tensorflow as tf
 import matplotlib.pyplot as plt
 import numpy as np
@@ -31,7 +33,12 @@ parser.add_argument('--memory_capacity', dest='memory_capacity', type=int, nargs
 parser.add_argument('-v', action='count', default=0) 
 parser.add_argument('--load', dest='load_path', type=str, default=None)
 parser.add_argument('--output', dest='output_path', type=str, default=None)
+parser.add_argument('--covariance', dest='covariance', type=str, nargs='+', default="original")
+parser.add_argument('--solve_threshold', dest='solve_threshold', type=float, nargs='+', default=None) #threshold for having solved environment
 args = parser.parse_args()
+
+def fill_episodes(rewards, n, value):
+  return rewards + [value]*n
 
 #get legends for plot
 def recursive_legend(keys, remaining_vals, vals):
@@ -68,10 +75,19 @@ def experiment(args):
   
   experiments_rewards = []
   for i in range(args['repeats']):
-    agent = naf.Agent(args['v'], env.observation_space, env.action_space, args['learning_rate'], args['batch_normalize'], args['gamma'], args['tau'], args['epsilon'], args['hidden_size'], args['hidden_n'], args['hidden_activation'], args['batch_size'], args['memory_capacity'], args['load_path'])
+    agent = naf.Agent(args['v'], env.observation_space, env.action_space, args['learning_rate'], args['batch_normalize'], args['gamma'], args['tau'], args['epsilon'], args['hidden_size'], args['hidden_n'], args['hidden_activation'], args['batch_size'], args['memory_capacity'], args['load_path'], args['covariance'])
     experiment_rewards = []
-  
+    terminate = None
+    solved = 0 #only relevant if solved_threshold is set
+
     for j in range(args['episodes']):
+      if terminate is not None:
+        fill_value = 0
+        if terminate == "solved":
+          fill_value = args['solve_threshold']
+        experiment_rewards = fill_episodes(experiment_rewards, args['episodes']-j, fill_value)
+        break
+
       rewards = 0
       state = env.reset()
  
@@ -80,6 +96,14 @@ def experiment(args):
           env.render()
         
         action = agent.get_action(state)
+        if np.isnan(np.min(action)): #if NaN action (neural network exploded)
+          print("Warning: NaN action, terminating agent")
+          with open("error.txt", "a") as error_file:
+            error_file.write(str(args) + " repeat " + str(i) + " episode " + str(j) + " step " + str(k) + " NaN\n")
+          rewards = 0 #TODO ?
+          terminate = "nan"
+          break
+        #print(action)
         state_next,reward,terminal,_ = env.step(agent.scale(action, env.action_space.low, env.action_space.high))
         
         if k-1 >= args['max_episode_steps']:
@@ -96,6 +120,16 @@ def experiment(args):
           agent.reset()
           break
       experiment_rewards += [rewards]
+
+      if args['solve_threshold'] is not None:
+        if rewards >= args['solve_threshold']:
+          solved += 1
+        else:
+          solved = 0
+        if solved >= 10: #number of repeated rewards above threshold to consider environment solved = 10
+          print("[Solved]")
+          terminate = "solved"
+
       if args['v'] > 0:
         print("Reward(" + str(i) + "," + str(j) + "," + str(k) + ")=" + str(rewards))
     if args['v'] > 1:
@@ -108,8 +142,8 @@ def experiment(args):
 #main
 
 #construct experiment inputs
-keys=['v', 'graph','render','environment','repeats','episodes','max_episode_steps','train_steps','batch_normalize', 'learning_rate','gamma','tau','epsilon','hidden_size','hidden_n','hidden_activation','batch_size', 'memory_capacity', 'load_path']
-vals=[args.v, args.graph, args.render, args.environment, args.repeats, args.episodes, args.max_episode_steps, args.train_steps, args.batch_normalize, args.learning_rate, args.gamma, args.tau, args.epsilon, args.hidden_size, args.hidden_n, args.hidden_activation, args.batch_size, args.memory_capacity, args.load_path]
+keys=['v', 'graph','render','environment','repeats','episodes','max_episode_steps','train_steps','batch_normalize', 'learning_rate','gamma','tau','epsilon','hidden_size','hidden_n','hidden_activation','batch_size', 'memory_capacity', 'load_path', 'covariance', 'solve_threshold']
+vals=[args.v, args.graph, args.render, args.environment, args.repeats, args.episodes, args.max_episode_steps, args.train_steps, args.batch_normalize, args.learning_rate, args.gamma, args.tau, args.epsilon, args.hidden_size, args.hidden_n, args.hidden_activation, args.batch_size, args.memory_capacity, args.load_path, args.covariance, args.solve_threshold]
 
 #run experiments
 rewards = recursive_experiment(keys, vals, [])
@@ -132,7 +166,7 @@ if args.output_path is not None:
   result_file.close()
 
 #plot
-if args.graph:
+if args.graph: #TODO separate plots for different envs - subplots or completely separate?
   for r in np.mean(rewards, -2): #mean of repeats
     plt.plot(r,'o')
   plt.legend(legend)
