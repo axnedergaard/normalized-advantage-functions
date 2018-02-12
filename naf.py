@@ -13,7 +13,6 @@
 import tensorflow as tf
 import numpy as np
 import random
-from tensorflow.python.ops.distributions.util import fill_lower_triangular
 
 class Memory:
   def __init__(self, capacity, batch_size, v):
@@ -90,7 +89,7 @@ class Agent:
     self.gamma = gamma
     self.tau = tau
     self.epsilon = epsilon
-    self.resets = 0
+    self.noise_updates = 0
 
     H_layer_n = hidden_n
     H_n = hidden_size 
@@ -126,8 +125,8 @@ class Agent:
       self.P = tf.matrix_set_diag(tf.eye(self.action_n,batch_shape=[tf.shape(self.x)[0]]), self.O.h) #diagonal covariance
 
     else:  #original NAF covariance
-      self.M = Layer(self.H.h, M_n, activation=tf.nn.tanh, batch_normalize=batch_normalize)
-      self.N = fill_lower_triangular(self.M.h)
+      self.M = Layer(self.H.h, M_n, activation=tf.nn.tanh, batch_normalize=batch_normalize) #tanh activation function to avoid exploding gradient
+      self.N = tf.contrib.distributions.fill_triangular(self.M.h)
       self.L = tf.matrix_set_diag(self.N, tf.exp(tf.matrix_diag_part(self.N)))
       self.P = tf.matmul(self.L, tf.matrix_transpose(self.L)) #original NAF covariance
 
@@ -151,10 +150,10 @@ class Agent:
       self.saver.restore(self.sess, load_path)
 
  
-  def reset(self):  #reset in between episodes (for example update epsilon), i is episode number 
+  def update_noise(self):
     if self.memory.ready:
-      self.resets = self.resets + 1
-      i = self.resets
+      self.noise_updates = self.noise_updates + 1
+      i = self.noise_updates
      # self.epsilon = 1.0/(1+i) 
       self.epsilon = 1.0/(1.0+0.1*i+(1.0/(i+1))*np.log(i)) #derived through black magic for inverted double pendulum
       if self.v > 1:

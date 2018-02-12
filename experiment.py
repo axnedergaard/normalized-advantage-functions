@@ -22,19 +22,19 @@ parser.add_argument('--max_episode_steps', dest='max_episode_steps', type=int, d
 parser.add_argument('--train_steps', dest='train_steps', type=int, default=5)
 parser.add_argument('--learning_rate', dest='learning_rate', type=float, nargs='+', default=0.01)
 parser.add_argument('--batch_normalize', dest='batch_normalize', type=bool, default=True)
-parser.add_argument('--gamma', dest='gamma', type=float,nargs='+', default=0.99)
-parser.add_argument('--tau', dest='tau', type=float,nargs='+', default=0.99)
-parser.add_argument('--epsilon', dest='epsilon', type=float, nargs='+', default=0.1)
-parser.add_argument('--hidden_size', dest='hidden_size', type=int, nargs='+', default=32)
-parser.add_argument('--hidden_n', dest='hidden_n', type=int,nargs='+', default=2)
-parser.add_argument('--hidden_activation', dest='hidden_activation', nargs='+', default=tf.nn.relu)
+parser.add_argument('--gamma', dest='gamma', type=float,nargs='+', default=0.99) #Q-learning decay hyperparameter
+parser.add_argument('--tau', dest='tau', type=float,nargs='+', default=0.99) #batch normalisation hyperparameter
+parser.add_argument('--epsilon', dest='epsilon', type=float, nargs='+', default=0.1) #noise hyperparameter
+parser.add_argument('--hidden_size', dest='hidden_size', type=int, nargs='+', default=32) #number of hidden layers
+parser.add_argument('--hidden_n', dest='hidden_n', type=int,nargs='+', default=2) #size of hidden layers
+parser.add_argument('--hidden_activation', dest='hidden_activation', nargs='+', default=tf.nn.relu) 
 parser.add_argument('--batch_size', dest='batch_size', type=int, nargs='+', default=128)
-parser.add_argument('--memory_capacity', dest='memory_capacity', type=int, nargs='+', default=10000)
-parser.add_argument('-v', action='count', default=0) 
-parser.add_argument('--load', dest='load_path', type=str, default=None)
-parser.add_argument('--output', dest='output_path', type=str, default=None)
-parser.add_argument('--covariance', dest='covariance', type=str, nargs='+', default="original")
-parser.add_argument('--solve_threshold', dest='solve_threshold', type=float, nargs='+', default=None) #threshold for having solved environment
+parser.add_argument('--memory_capacity', dest='memory_capacity', type=int, nargs='+', default=10000) #size of memory
+parser.add_argument('-v', action='count', default=0) #verbosity (e.g. show rewards)
+parser.add_argument('--load', dest='load_path', type=str, default=None) #load path for neural network weights
+parser.add_argument('--output', dest='output_path', type=str, default=None) #output path for experiment results
+parser.add_argument('--covariance', dest='covariance', type=str, nargs='+', default="original") #covariance matrix for NAF algorithm (original, diagonal, identity)
+parser.add_argument('--solve_threshold', dest='solve_threshold', type=float, default=None) #threshold for having solved environment - different thresholds for different environments in same experiment not supported
 args = parser.parse_args()
 
 def fill_episodes(rewards, n, value):
@@ -117,7 +117,7 @@ def experiment(args):
         state = state_next
         rewards += reward
         if terminal:
-          agent.reset()
+          agent.update_noise()
           break
       experiment_rewards += [rewards]
 
@@ -126,7 +126,7 @@ def experiment(args):
           solved += 1
         else:
           solved = 0
-        if solved >= 10: #number of repeated rewards above threshold to consider environment solved = 10
+        if solved >= 100: #number of repeated rewards above threshold to consider environment solved = 100
           print("[Solved]")
           terminate = "solved"
 
@@ -137,7 +137,6 @@ def experiment(args):
     experiments_rewards += [experiment_rewards]
 
   return experiments_rewards
-
 
 #main
 
