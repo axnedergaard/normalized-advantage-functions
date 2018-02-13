@@ -1,7 +1,6 @@
 #Based on 'Continuous Deep Q-learning with Model Based Acceleration' by Gu et al, 2016. Available from: https://arxiv.org/pdf/1603.00748.pdf
 
 #TODO
-#investigate and fix nan action bug
 #confirm saver working
 #additional observation/action space support (continuous)
 #experiment with different advantage functions/covariance matrices for advantage function
@@ -9,6 +8,7 @@
 #adaptive batch size?
 #memories weighted by information/loss?
 #improved network initialisation?
+#reward normalization?
 
 import tensorflow as tf
 import numpy as np
@@ -42,8 +42,8 @@ class Layer:
     batch_size, in_n = np.shape(x)
     in_n = int(in_n)
     if batch_normalize:
-      variance_epsilon = 0.000001
-      decay = 0.999
+      variance_epsilon = 0.000001 #TODO parameterise?
+      decay = 0.999 #TODO parameterise?
       self.gamma = tf.Variable(tf.constant(1,shape=[in_n],dtype=tf.float32), trainable=True)
       self.beta = tf.Variable(tf.constant(0,shape=[in_n],dtype=tf.float32), trainable=True)
       self.moving_mean = tf.Variable(tf.constant(0,shape=[in_n],dtype=tf.float32), trainable=False)
@@ -124,8 +124,12 @@ class Agent:
       self.O = Layer(self.H.h, mu_n, batch_normalize=batch_normalize) #nn input to diagonal covariance
       self.P = tf.matrix_set_diag(tf.eye(self.action_n,batch_shape=[tf.shape(self.x)[0]]), self.O.h) #diagonal covariance
 
+    elif covariance == "square": #square (nonzero) covariance with nn inputs (every entry in matrix is unique input from nn) NOT TESTED
+      self.O = Layer(self.H.n.h, mu_n*mu_n, batch_normalize=batch_normalize) #nn inputs to square covariance
+      self.P = tf.reshape(self.O, [mu_n, mu_n])
+
     else:  #original NAF covariance
-      self.M = Layer(self.H.h, M_n, activation=tf.nn.tanh, batch_normalize=batch_normalize) #tanh activation function to avoid exploding gradient
+      self.M = Layer(self.H.h, M_n, activation=tf.nn.tanh, batch_normalize=batch_normalize) #tanh activation function to avoid exploding gradient TODO instead normalise rewards?
       self.N = tf.contrib.distributions.fill_triangular(self.M.h)
       self.L = tf.matrix_set_diag(self.N, tf.exp(tf.matrix_diag_part(self.N)))
       self.P = tf.matmul(self.L, tf.matrix_transpose(self.L)) #original NAF covariance
@@ -148,35 +152,35 @@ class Agent:
     self.saver = tf.train.Saver()
     if load_path is not None:
       self.saver.restore(self.sess, load_path)
-
  
   def update_noise(self):
     if self.memory.ready:
       self.noise_updates = self.noise_updates + 1
       i = self.noise_updates
-     # self.epsilon = 1.0/(1+i) 
+      #self.epsilon = 1.0/(1+i) 
       self.epsilon = 1.0/(1.0+0.1*i+(1.0/(i+1))*np.log(i)) #derived through black magic for inverted double pendulum
+      #self.epsilon = 1.0/(np.log(i+1)/np.log(3) + 0.001) #derived through black magic for inverted double pendulum 2
       if self.v > 1:
         print("[Update epsilon: " + str(self.epsilon) + "]") 
-    #self.epsilon = 1.0/(np.log(i+1)/np.log(3) + 0.001) #derived through black magic for inverted double pendulum 2
 
   def save(self, path):
     self.saver.save(self.sess, path)
 
   def get_action(self,s):
-    mu = self.sess.run(self.mu.h, feed_dict={self.x:np.reshape(s,[1,-1])})[0]
-    
     #random action with probability epsilon
+    mu = self.sess.run(self.mu.h, feed_dict={self.x:np.reshape(s,[1,-1])})[0]
     if np.random.rand() < self.epsilon:
       action = np.random.rand(self.action_n)*2-1 #random action
     else:
       action = mu
-
     return action
 
- #  covariance = np.eye(self.action_n)
- #   return self.noise(mu, covariance)
+    #random noise to action
+    #mu = self.sess.run(self.mu.h, feed_dict={self.x:np.reshape(s,[1,-1])})[0]
+    #covariance = np.eye(self.action_n)
+    #return self.noise(mu, covariance)
     
+    #random noise to action based on covariance matrix
     #mu,p_inv = self.sess.run([self.mu.h,self.P_inverse],feed_dict={self.x:np.reshape(s,[1,-1])})[0]
     #return self.noise(mu, p_inv)
   
@@ -198,7 +202,6 @@ class Agent:
         batch_reward += [t_r]
         batch_terminal += [t_terminal]
       batch_target = self.get_target(batch_action, batch_reward, batch_state_next, batch_terminal)
-      #l,a,self.p_inv = self.backprop(batch_state, batch_action, batch_target)
       l,a = self.backprop(batch_state, batch_action, batch_target)
       self.update_target()
       if (self.v > 2):

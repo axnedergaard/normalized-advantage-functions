@@ -1,5 +1,3 @@
-#TODO improved logging, include if env solved
-
 import tensorflow as tf
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,7 +13,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  #silence TF compilation warnings
 parser = argparse.ArgumentParser()
 parser.add_argument('--graph', action='store_true')
 parser.add_argument('--render', action='store_true')
-parser.add_argument('--environment', dest='environment', nargs='+', type=str, default='InvertedPendulum-v1')
+parser.add_argument('--environment', dest='environment', nargs='+', type=str, default='InvertedPendulum-v2')
 parser.add_argument('--repeats', dest='repeats', type=int, default=1)
 parser.add_argument('--episodes', dest='episodes', type=int, default=1000)
 parser.add_argument('--max_episode_steps', dest='max_episode_steps', type=int, default=1000)
@@ -27,16 +25,17 @@ parser.add_argument('--tau', dest='tau', type=float,nargs='+', default=0.99) #ba
 parser.add_argument('--epsilon', dest='epsilon', type=float, nargs='+', default=0.1) #noise hyperparameter
 parser.add_argument('--hidden_size', dest='hidden_size', type=int, nargs='+', default=32) #number of hidden layers
 parser.add_argument('--hidden_n', dest='hidden_n', type=int,nargs='+', default=2) #size of hidden layers
-parser.add_argument('--hidden_activation', dest='hidden_activation', nargs='+', default=tf.nn.relu) 
+parser.add_argument('--hidden_activation', dest='hidden_activation', nargs='+', default=tf.nn.relu) #TODO parse string to set TF activation function object 
 parser.add_argument('--batch_size', dest='batch_size', type=int, nargs='+', default=128)
 parser.add_argument('--memory_capacity', dest='memory_capacity', type=int, nargs='+', default=10000) #size of memory
 parser.add_argument('-v', action='count', default=0) #verbosity (e.g. show rewards)
 parser.add_argument('--load', dest='load_path', type=str, default=None) #load path for neural network weights
 parser.add_argument('--output', dest='output_path', type=str, default=None) #output path for experiment results
-parser.add_argument('--covariance', dest='covariance', type=str, nargs='+', default="original") #covariance matrix for NAF algorithm (original, diagonal, identity)
+parser.add_argument('--covariance', dest='covariance', type=str, nargs='+', default="original") #covariance matrix for NAF algorithm (original, diagonal, identity, (not tested) square)
 parser.add_argument('--solve_threshold', dest='solve_threshold', type=float, default=None) #threshold for having solved environment - different thresholds for different environments in same experiment not supported
 args = parser.parse_args()
 
+#fill remaining episodes, e.g. if neural network explodes or solve threshold is reached
 def fill_episodes(rewards, n, value):
   return rewards + [value]*n
 
@@ -83,7 +82,7 @@ def experiment(args):
     for j in range(args['episodes']):
       if terminate is not None:
         fill_value = 0
-        if terminate == "solved":
+        if terminate == "solved": #if solved, set fill value to solve threshold value
           fill_value = args['solve_threshold']
         experiment_rewards = fill_episodes(experiment_rewards, args['episodes']-j, fill_value)
         break
@@ -100,7 +99,7 @@ def experiment(args):
           print("Warning: NaN action, terminating agent")
           with open("error.txt", "a") as error_file:
             error_file.write(str(args) + " repeat " + str(i) + " episode " + str(j) + " step " + str(k) + " NaN\n")
-          rewards = 0 #TODO ?
+          rewards = 0
           terminate = "nan"
           break
         #print(action)
