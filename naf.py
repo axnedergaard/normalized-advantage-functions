@@ -1,7 +1,6 @@
 #Based on 'Continuous Deep Q-learning with Model Based Acceleration' by Gu et al, 2016. Available from: https://arxiv.org/pdf/1603.00748.pdf
 
 #TODO
-#confirm saver working
 #additional observation/action space support (continuous)
 #experiment with different advantage functions/covariance matrices for advantage function
 #more clever exploration policy
@@ -9,6 +8,7 @@
 #memories weighted by information/loss?
 #improved network initialisation?
 #reward normalization?
+#confirm saver working and implement parameterised automatic saving
 
 import tensorflow as tf
 import numpy as np
@@ -36,7 +36,7 @@ class Memory:
   def sample(self):
     return random.sample(self.m, self.batch_size)
 
-class Layer:
+class NeuralNetworkLayer:
   def __init__(self, input_layer, out_n, activation=None, batch_normalize=False):
     x = input_layer
     batch_size, in_n = np.shape(x)
@@ -104,32 +104,32 @@ class Agent:
     self.u = tf.placeholder(shape=[None,self.action_n], dtype=tf.float32, name="action")
     self.target = tf.placeholder(shape=[None,1], dtype=tf.float32, name="target")
 
-    self.H = Layer(self.x, H_n, activation=hidden_activation, batch_normalize=batch_normalize) 
-    self.t_H = Layer(self.x, H_n, activation=hidden_activation, batch_normalize=batch_normalize) #target
+    self.H = NeuralNetworkLayer(self.x, H_n, activation=hidden_activation, batch_normalize=batch_normalize) 
+    self.t_H = NeuralNetworkLayer(self.x, H_n, activation=hidden_activation, batch_normalize=batch_normalize) #target
     self.updates = self.t_H.construct_update(self.H, self.tau)
     for i in range(1,H_layer_n):
-      self.H = Layer(self.H.h, H_n, activation=hidden_activation, batch_normalize=batch_normalize) 
-      self.t_H = Layer(self.t_H.h, H_n, activation=hidden_activation, batch_normalize=batch_normalize) #target 
+      self.H = NeuralNetworkLayer(self.H.h, H_n, activation=hidden_activation, batch_normalize=batch_normalize) 
+      self.t_H = NeuralNetworkLayer(self.t_H.h, H_n, activation=hidden_activation, batch_normalize=batch_normalize) #target 
       self.updates += self.t_H.construct_update(self.H, self.tau)
 
-    self.V = Layer(self.H.h, V_n, batch_normalize=batch_normalize)
-    self.t_V = Layer(self.t_H.h, V_n, batch_normalize=batch_normalize) #target
+    self.V = NeuralNetworkLayer(self.H.h, V_n, batch_normalize=batch_normalize)
+    self.t_V = NeuralNetworkLayer(self.t_H.h, V_n, batch_normalize=batch_normalize) #target
     self.updates += self.t_V.construct_update(self.V, self.tau)
-    self.mu = Layer(self.H.h, mu_n, activation=tf.nn.tanh, batch_normalize=batch_normalize)
+    self.mu = NeuralNetworkLayer(self.H.h, mu_n, activation=tf.nn.tanh, batch_normalize=batch_normalize)
 
     if covariance == "identity": #identity covariance
       self.P = tf.eye(self.action_n,batch_shape=[tf.shape(self.x)[0]]) #identity covariance
 
     elif covariance == "diagonal": #diagonal covariance with nn inputs
-      self.O = Layer(self.H.h, mu_n, batch_normalize=batch_normalize) #nn input to diagonal covariance
+      self.O = NeuralNetworkLayer(self.H.h, mu_n, batch_normalize=batch_normalize) #nn input to diagonal covariance
       self.P = tf.matrix_set_diag(tf.eye(self.action_n,batch_shape=[tf.shape(self.x)[0]]), self.O.h) #diagonal covariance
 
     elif covariance == "square": #square (nonzero) covariance with nn inputs (every entry in matrix is unique input from nn) NOT TESTED
-      self.O = Layer(self.H.n.h, mu_n*mu_n, batch_normalize=batch_normalize) #nn inputs to square covariance
+      self.O = NeuralNetworkLayer(self.H.n.h, mu_n*mu_n, batch_normalize=batch_normalize) #nn inputs to square covariance
       self.P = tf.reshape(self.O, [mu_n, mu_n])
 
     else:  #original NAF covariance
-      self.M = Layer(self.H.h, M_n, activation=tf.nn.tanh, batch_normalize=batch_normalize) #tanh activation function to avoid exploding gradient TODO instead normalise rewards?
+      self.M = NeuralNetworkLayer(self.H.h, M_n, activation=tf.nn.tanh, batch_normalize=batch_normalize) #tanh activation function to avoid exploding gradient TODO instead normalise rewards?
       self.N = tf.contrib.distributions.fill_triangular(self.M.h)
       self.L = tf.matrix_set_diag(self.N, tf.exp(tf.matrix_diag_part(self.N)))
       self.P = tf.matmul(self.L, tf.matrix_transpose(self.L)) #original NAF covariance
