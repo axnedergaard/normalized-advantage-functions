@@ -1,6 +1,6 @@
 # Normalized Advantage Functions
 
-Implementation of the Normalized Advantage Functions algorithms (from the paper Continuous Deep Q-Learning with Model-based Acceleration, Gu et al., 2016: https://arxiv.org/abs/1603.00748) in Python TensorFlow.
+Implementation of the Normalized Advantage Functions algorithm (from the paper _Continuous Deep Q-Learning with Model-based Acceleration_, Gu et al., 2016: https://arxiv.org/abs/1603.00748) in Python TensorFlow.
 
 Motivated by OpenAI request for research: https://openai.com/requests-for-research/#improved-q-learning-with-continuous-actions
 
