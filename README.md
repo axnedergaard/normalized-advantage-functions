@@ -1,5 +1,8 @@
-# Continuous-Deep-Q-learning
-Deep Q-learning for OpenAI Gym environments with continuous action spaces. Motivated by OpenAI request for research: https://openai.com/requests-for-research/#improved-q-learning-with-continuous-actions
+# Normalized Advantage Functions
+
+Implementation of the Normalized Advantage Functions (from the paper Continuous Deep Q-Learning with Model-based Acceleration, Gu et al., 2016: https://arxiv.org/abs/1603.00748) in Python TensorFlow.
+
+Motivated by OpenAI request for research: https://openai.com/requests-for-research/#improved-q-learning-with-continuous-actions
 
 Dependencies: gym, tensorflow (1.5.0), numpy, matplotlib 
 
